@@ -1,0 +1,92 @@
+package com.balamurugan;
+
+import org.openqa.selenium.Credentials;
+import org.openqa.selenium.HasAuthentication;
+import org.openqa.selenium.UsernameAndPassword;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+
+import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.Predicate;
+
+public class DualAuthExample {
+
+    private static final List<String> PROXY_HOSTS = Arrays.asList("proxy.mycompany.com");
+    private static final List<String> EXTERNAL_HOSTS = Arrays.asList("externalapp.com");
+
+    // Keep track of the URL you plan to visit (important for distinguishing auth)
+    private static final ThreadLocal<String> TARGET_URL = new ThreadLocal<>();
+
+    public static void main(String[] args) {
+        ChromeOptions options = new ChromeOptions();
+
+        /*
+        // Optional proxy setup
+        Proxy proxy = new Proxy();
+        proxy.setHttpProxy("proxy.mycompany.com:8080")
+             .setSslProxy("proxy.mycompany.com:8080")
+             .setNoProxy("externalapp.com");
+        options.setProxy(proxy);
+        */
+
+        WebDriver driver = new ChromeDriver(options);
+
+        ((HasAuthentication) driver).register(
+                createAuthPredicate(),
+                () -> new UsernameAndPassword("user", "pass")
+        );
+
+        // Test with external URL (needs credentials)
+        TARGET_URL.set("https://externalapp.com/secure");
+        driver.get(TARGET_URL.get());
+
+        // Test with internal URL (no credentials)
+        TARGET_URL.set("http://internalapp.local/dashboard");
+        driver.get(TARGET_URL.get());
+
+        driver.quit();
+    }
+
+    /**
+     * Builds a predicate that decides when to send credentials.
+     */
+    private static Predicate<URI> createAuthPredicate() {
+        return authUri -> {
+            String host = authUri != null ? authUri.getHost() : null;
+            System.out.println("Auth requested for: " + host);
+
+            // Check if it's a proxy auth
+            if (host != null && PROXY_HOSTS.stream().anyMatch(h -> h.equalsIgnoreCase(host))) {
+                return true;
+            }
+
+            // Otherwise, check if planned target URL matches an external host
+            String plannedUrl = TARGET_URL.get();
+            if (plannedUrl != null) {
+                String plannedHost = safeGetHost(plannedUrl);
+                if (plannedHost != null) {
+                    return EXTERNAL_HOSTS.stream().anyMatch(
+                            ext -> plannedHost.equalsIgnoreCase(ext) ||
+                                    plannedHost.endsWith("." + ext)
+                    );
+                }
+            }
+            return false;
+        };
+    }
+
+    /**
+     * Safely extracts host from a URL string.
+     */
+    private static String safeGetHost(String url) {
+        try {
+            return URI.create(url).getHost();
+        } catch (Exception e) {
+            System.err.println("Invalid URL: " + url);
+            return null;
+        }
+    }
+}
